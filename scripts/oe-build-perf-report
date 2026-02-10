@@ -423,36 +423,6 @@ def print_html_report(data, id_comp, buildstats):
                             'max': get_data_item(data[-1][0], 'layers.meta.commit_count')}
                  }
 
-    # Get commit annotations from Yocto’s git,
-    # mush them into the metadata object,
-    # and also output them as a POJO so eCharts can use them
-
-    commitAnnotationsURL = 'https://git.yoctoproject.org/yocto-buildstats/plain/annotations.json'
-    commitAnnotationsJSON = {}
-    try:
-        response = urlopen(commitAnnotationsURL)
-        commitAnnotationsJSON = json.loads(response.read())
-        # Splice the annotations into the metadata
-        commit = metadata.get('commit', {})
-        annotations_out = {}
-
-        if (h := commit.get('value')) in commitAnnotationsJSON:
-            annotations_out['value'] = commitAnnotationsJSON[h]
-
-        if (h := commit.get('value_old')) in commitAnnotationsJSON:
-            annotations_out['value_old'] = commitAnnotationsJSON[h]
-
-        if annotations_out:
-            metadata['commit_annotation'] = annotations_out
-            metadata['commit_annotation']['title'] = "Commit annotation"
-
-    except error.URLError as e:
-        logging.debug(f"Couldn't find any commit annotations at {commitAnnotationsURL}, reason: {e.reason}.")
-    except json.decoder.JSONDecodeError as e:
-        logging.error(f"Invalid JSON received from {commitAnnotationsURL}, error: {e}")
-    except Exception as e:
-        logging.exception(f"Unexpected error while loading annotations: {e}")
-
     ### JSONifying data for consumption by Apache eCharts
     
     # Make a copy of tests to pare down into what we need as JSON
@@ -522,7 +492,6 @@ def print_html_report(data, id_comp, buildstats):
     
     # Output all the JSON to the head of the report html
     print(f"""<script type="text/javascript">
-    const commitAnnotations = {commitAnnotationsJSON}
     const chartData = {json_str}
 </script>""")
 

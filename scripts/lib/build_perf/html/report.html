@@ -140,6 +140,11 @@ button:hover {
   max-width: 30em;
   text-wrap: auto;
 }
+
+.annotation-container:not(:empty) {
+  display: inline-block;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --text: #e9e8fa;
@@ -198,8 +203,8 @@ button:hover {
       <tr>
         <th>{{ item.title }}</th>
         {%if key == 'commit' %}
-          <td>{{ poky_link(item.value) }}{%if metadata.commit_annotation and metadata.commit_annotation.value %}<br>{{metadata.commit_annotation.value}}{% endif %}</td>
-          <td>{{ poky_link(item.value_old) }}{%if metadata.commit_annotation and metadata.commit_annotation.value %}<br>{{metadata.commit_annotation.value_old}}{% endif %}</td>
+          <td>{{ poky_link(item.value) }}<span class="annotation-container" data-commit="{{ item.value }}"></span></td>
+          <td>{{ poky_link(item.value_old) }}<span class="annotation-container" data-commit="{{ item.value_old }}"></span></td>
         {% elif key == 'commit_annotation' %}
         {% else %}
           <td>{{ item.value }}</td>
@@ -404,6 +409,18 @@ button:hover {
 
 <script type="text/javascript">
 
+const commitAnnotationsURL = 'https://git.yoctoproject.org/yocto-buildstats/plain/annotations.json'
+let commitAnnotations
+
+const fetchCommitAnnotations = async () => {
+  try {
+    const response = await fetch(commitAnnotationsURL)
+    commitAnnotations = await response.json()
+  } catch (error) {
+    console.error(`Could not load commit annotations: ${error}`)
+  }
+}
+
 const getCommonChartConfig = (measurement) => {
   return {
     tooltip: {
@@ -457,7 +474,6 @@ const generateTooltip = (param, sample, type) => {
   // Add commit hash to the tooltip as a link
   const commitLink = `https://git.yoctoproject.org/yocto-buildstats/commit/?id=${sample[0][2]}`
   const commitAnnotation = commitAnnotations[sample[0][2]]
-  console.log('commitAnnotation', commitAnnotation)
   if (type == 'time') {
     const hours = Math.floor(value/60)
     const minutes = Math.floor(value % 60)
@@ -473,65 +489,79 @@ const generateTooltip = (param, sample, type) => {
   return `<strong>Size:</strong> ${value.toFixed(2)} MB, <strong>Commit number:</strong> <a href="${commitLink}" target="_blank" rel="noreferrer noopener">${sample[0][1]}</a>, <br/> <strong>Start time:</strong> ${formattedDate}`;
 }
 
-chartData.forEach(test => {
-  // sample array is:
-  // [start_time_in_ms, commit_num, commit_hash, duration_in_minutes_or_size]
-  test.measurements.forEach(measurement => {
-    const sharedChartConfig = getCommonChartConfig(measurement)
-    const startTimeChartConfig = {
-      ...sharedChartConfig,
-      tooltip: {
-        ...sharedChartConfig.tooltip,
-        formatter: function (param) {
-          const sample = measurement.combo_samples.filter(([start_time_in_ms, commit_num, commit_hash, duration_in_minutes_or_size]) => param[0].axisValue === start_time_in_ms)
-          return generateTooltip(param, sample, measurement.value_type)
-        }
-      },
-      series: [
-        {
-          name: measurement.value_type,
-          type: 'line',
-          symbol: 'none',
+const buildCharts = async () => {
+  await fetchCommitAnnotations()
+  chartData.forEach(test => {
+    // sample array is:
+    // [start_time_in_ms, commit_num, commit_hash, duration_in_minutes_or_size]
+    test.measurements.forEach(measurement => {
+      const sharedChartConfig = getCommonChartConfig(measurement)
+      const startTimeChartConfig = {
+        ...sharedChartConfig,
+        tooltip: {
+          ...sharedChartConfig.tooltip,
+          formatter: function (param) {
+            const sample = measurement.combo_samples.filter(([start_time_in_ms, commit_num, commit_hash, duration_in_minutes_or_size]) => param[0].axisValue === start_time_in_ms)
+            return generateTooltip(param, sample, measurement.value_type)
+          }
+        },
+        series: [
+          {
+            name: measurement.value_type,
+            type: 'line',
+            symbol: 'none',
+            data: measurement.combo_samples.map((sample) => {
+              return [sample[0], sample[3]]
+            })
+          }
+        ]
+      }
+      const commitCountChartConfig = {
+        ...sharedChartConfig,
+        // Custom xAxis that displays the commit numbers
+        xAxis: {
+          name: 'Commit count',
+          type: 'category',
           data: measurement.combo_samples.map((sample) => {
-            return [sample[0], sample[3]]
-          })
+              return sample[1]
+            })
+        },
+        tooltip: {
+          ...sharedChartConfig.tooltip,
+          formatter: function (param) {
+            const sample = measurement.combo_samples.filter(([start_time_in_ms, commit_num, commit_hash, duration_in_minutes_or_size]) => param[0].axisValue == commit_num)
+            return generateTooltip(param, sample, measurement.value_type)
+          }
+        },
+        series: [
+          {
+            name: measurement.value_type,
+            type: 'line',
+            symbol: 'none',
+            data: measurement.combo_samples.map((sample) => {
+              return sample[3]
+            })
+          }
+        ]
+      }
+      drawChart(measurement.chart_elem_start_time_id, startTimeChartConfig)
+      drawChart(measurement.chart_elem_commit_count_id, commitCountChartConfig)
+    })
+
+    // Splice commit annotations into the table at the top of the page
+    if (commitAnnotations) {
+      document.querySelectorAll("[data-commit]").forEach((item) => {
+        const commitNumber = item.getAttribute("data-commit")
+        const matchingAnnotation = commitAnnotations[commitNumber]
+        if (matchingAnnotation) {
+          item.innerText = matchingAnnotation
         }
-      ]
+      })
     }
-    const commitCountChartConfig = {
-      ...sharedChartConfig,
-      // Custom xAxis that displays the commit numbers
-      xAxis: {
-        name: 'Commit count',
-        type: 'category',
-        data: measurement.combo_samples.map((sample) => {
-            return sample[1]
-          })
-      },
-      tooltip: {
-        ...sharedChartConfig.tooltip,
-        formatter: function (param) {
-          const sample = measurement.combo_samples.filter(([start_time_in_ms, commit_num, commit_hash, duration_in_minutes_or_size]) => param[0].axisValue == commit_num)
-          return generateTooltip(param, sample, measurement.value_type)
-        }
-      },
-      series: [
-        {
-          name: measurement.value_type,
-          type: 'line',
-          symbol: 'none',
-          data: measurement.combo_samples.map((sample) => {
-            return sample[3]
-          })
-        }
-      ]
-    }
-    drawChart(measurement.chart_elem_start_time_id, startTimeChartConfig)
-    drawChart(measurement.chart_elem_commit_count_id, commitCountChartConfig)
   })
-})
+}
 
-
+buildCharts()
 
 function openChart(event, chartType, chartName) {
   let i, tabcontents, tablinks
